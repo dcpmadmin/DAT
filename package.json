@@ -5,11 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:main": "cross-env VITE_BUILD_TARGET=main vite build",
-    "build:map": "cross-env VITE_BUILD_TARGET=map vite build",
-    "dev:electron": "concurrently \"vite\" \"cross-env VITE_DEV_SERVER_URL=http://localhost:8080 electron .\"",
-    "build": "npm run build:main && npm run build:map",
-    "dist": "npm run build && electron-builder",
+    "dev:api": "tsx worker/dev-server.ts",
+    "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -70,6 +67,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240925.0",
     "@eslint/js": "^9.9.0",
     "@tailwindcss/typography": "^0.5.15",
     "@types/node": "^22.5.5",
@@ -77,10 +75,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
-    "concurrently": "^9.2.0",
-    "cross-env": "^10.0.0",
-    "electron": "^37.2.6",
-    "electron-builder": "^26.0.12",
+    "better-sqlite3": "^11.7.0",
     "eslint": "^9.9.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
@@ -88,34 +83,12 @@
     "lovable-tagger": "^1.1.7",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.11",
+    "tsx": "^4.19.1",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
     "vite": "^5.4.1",
-    "wait-on": "^8.0.4"
+    "wait-on": "^8.0.4",
+    "wrangler": "^3.78.0"
   },
-  "main": "electron/main.cjs",
-  "build": {
-    "appId": "com.dcpm.damageassessor",
-    "productName": "Damage Assessor Tool",
-    "directories": {
-      "output": "release",
-      "buildResources": "assets"
-    },
-    "files": [
-      "dist/**",
-      "electron/**",
-      "package.json"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
-  }
+  "main": "index.html"
 }

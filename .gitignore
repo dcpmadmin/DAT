@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 package-lock.json
+dist-map
+release
+win-unpacked
+electron
+*.exe
+*.asar
+local_storage
+.wrangler
 
 # Editor directories and files
 .vscode/*

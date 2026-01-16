@@ -3,28 +3,16 @@ import { ReportUploader } from './ReportUploader';
 import { DashboardHome } from './DashboardHome';
 import { ReportHeader } from './ReportHeader';
 import { PhotoGallery } from './PhotoGallery';
-import { DamageMap } from './DamageMap';
-import type { DamageMapHandle } from './DamageMap';
 import { ReportGenerator } from './ReportGenerator';
 import { ApprovalControls } from './ApprovalControls';
 import { PhotoSet, GalleryType, DamageReportState, PhotoMetadata, PhotoSetApproval } from '@/types/damage-report';
 import { processFolderStructure } from '@/utils/photo-processing';
 import { parseDamageDetailsFile, DamageDetailsColumnMapping } from '@/utils/damage-details';
+import { listAssessments, upsertAssessment } from '@/api/client';
+import type { AssessmentUpsert, SerializedApproval } from '@/shared/assessment';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Ruler, Satellite, MousePointer2 } from 'lucide-react';
-
-declare global {
-  interface Window {
-    electron: {
-      ipcRenderer: {
-        send: (channel: string, data: any) => void;
-        on: (channel: string, func: (...args: any[]) => void) => () => void;
-      };
-    };
-  }
-}
 
 interface ReportMetrics {
   distanceMeters?: number;
@@ -178,28 +166,31 @@ const [isProcessing, setIsProcessing] = useState(false);
 
       setState(newState);
       toast.success(`Successfully processed ${photoSetsWithDetails.length} damage reports!`);
-
       try {
-        const raw = localStorage.getItem('dm_session');
-        if (raw) {
-          const parsed = JSON.parse(raw) as { approvals?: Record<string, PhotoSetApproval>; metricsById?: Record<string, ReportMetrics> };
-          const damageIdSet = new Set(photoSetsWithDetails.map((ps) => ps.damageId));
-          const approvals = Object.fromEntries(
-            Object.entries(parsed.approvals || {}).filter(([id]) => damageIdSet.has(id)).map(([id, approval]) => [
-              id,
-              { ...approval, timestamp: approval?.timestamp ? new Date(approval.timestamp as any) : new Date() }
-            ])
-          );
-          const metricsById = Object.fromEntries(
-            Object.entries(parsed.metricsById || {}).filter(([id]) => damageIdSet.has(id))
-          );
-          const overlapCount = Object.keys(approvals).length + Object.keys(metricsById).length;
-          if (overlapCount > 0) {
-            setResumeCandidate({ approvals, metricsById, overlapCount });
-            setResumePromptOpen(true);
+        const records = await listAssessments();
+        const damageIdSet = new Set(photoSetsWithDetails.map((ps) => ps.damageId));
+        const approvals: Record<string, PhotoSetApproval> = {};
+        const metricsById: Record<string, ReportMetrics> = {};
+        records.forEach((record) => {
+          if (!damageIdSet.has(record.damageId)) return;
+          if (record.approval) {
+            approvals[record.damageId] = {
+              ...record.approval,
+              timestamp: new Date(record.approval.timestamp)
+            } as PhotoSetApproval;
           }
+          if (record.metrics) {
+            metricsById[record.damageId] = record.metrics;
+          }
+        });
+        const overlapCount = Object.keys(approvals).length + Object.keys(metricsById).length;
+        if (overlapCount > 0) {
+          setResumeCandidate({ approvals, metricsById, overlapCount });
+          setResumePromptOpen(true);
         }
-      } catch {}
+      } catch (error) {
+        console.warn('Failed to load saved assessments:', error);
+      }
     } catch (error) {
       console.error('Error processing files:', error);
       toast.error('Failed to process uploaded files. Please check the folder structure.');
@@ -313,14 +304,6 @@ const [isProcessing, setIsProcessing] = useState(false);
       toast.error("Please upload photos first.");
       return;
     }
-    if (window.electron?.ipcRenderer) {
-      try {
-        window.electron.ipcRenderer.send('open-damage-map-window', { photoSet: currentSet });
-      } catch (error) {
-        console.warn('Failed to open map in separate window:', error);
-      }
-      return;
-    }
     try {
       const mapPayload = buildMapPayload(currentSet);
       localStorage.setItem('dm_map_photoSet', JSON.stringify(mapPayload));
@@ -353,10 +336,6 @@ const [isProcessing, setIsProcessing] = useState(false);
         [gallery]: photo
       }
     }));
-    // Send message to map window to highlight this photo
-    if (window.electron?.ipcRenderer) {
-      window.electron.ipcRenderer.send('highlight-photo-on-map', photo.name);
-    }
   }, []);
 
   const handleRotate = useCallback((gallery: GalleryType) => {
@@ -439,41 +418,44 @@ const [isProcessing, setIsProcessing] = useState(false);
       }
       return nextState;
     });
-    
     // Force a re-render to ensure UI updates
     setTimeout(() => {
       setState(prev => ({ ...prev }));
     }, 100);
-  }, []);
+    const metrics = metricsById[damageId];
+    const payload: AssessmentUpsert = {
+      damageId,
+      approval: {
+        ...approval,
+        timestamp: approval.timestamp.toISOString()
+      } as SerializedApproval,
+      metrics
+    };
+    upsertAssessment(payload).catch((error) => {
+      console.warn('Failed to persist assessment:', error);
+    });
+  }, [metricsById]);
 
   const handleMetricsChange = useCallback((damageId: string, metrics: ReportMetrics) => {
     setMetricsById(prev => ({ ...prev, [damageId]: metrics }));
-    try { localStorage.setItem(`dm_metrics_${damageId}`, JSON.stringify(metrics)); } catch {}
-  }, []);
+    const approval = state.approvals[damageId];
+    const payload: AssessmentUpsert = {
+      damageId,
+      approval: approval
+        ? ({
+            ...approval,
+            timestamp: approval.timestamp.toISOString()
+          } as SerializedApproval)
+        : undefined,
+      metrics
+    };
+    upsertAssessment(payload).catch((error) => {
+      console.warn('Failed to persist assessment:', error);
+    });
+  }, [state.approvals]);
 
   const handleDistanceChange = useCallback((distance: number) => { setLastMeasuredDistance(distance); }, []);
 
-  useEffect(() => {
-    if (!currentSet) return;
-    try {
-      const raw = localStorage.getItem(`dm_metrics_${currentSet.damageId}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setMetricsById(prev => ({ ...prev, [currentSet.damageId]: parsed }));
-      }
-    } catch {}
-  }, [currentSet?.damageId]);
-
-  useEffect(() => {
-    if (state.photoSets.length === 0) return;
-    try {
-      localStorage.setItem('dm_session', JSON.stringify({
-        approvals: state.approvals,
-        metricsById,
-        savedAt: new Date().toISOString()
-      }));
-    } catch {}
-  }, [state.photoSets.length, state.approvals, metricsById]);
 
   useEffect(() => {
     if (filteredIndices.length === 0) return;
@@ -484,10 +466,6 @@ const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (!currentSet) return;
-    if (window.electron?.ipcRenderer) {
-      window.electron.ipcRenderer.send('open-damage-map-window', { photoSet: currentSet });
-      return;
-    }
     if (mapWindowRef.current && !mapWindowRef.current.closed) {
       const mapPayload = buildMapPayload(currentSet);
       try {

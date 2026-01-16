@@ -1,0 +1,12 @@
+name = "damage-assessor-api"
+main = "worker/index.ts"
+compatibility_date = "2024-10-01"
+
+[[r2_buckets]]
+binding = "OBJECT_STORE"
+bucket_name = "damage-assessor-uploads"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "damage-assessor-db"
+database_id = "REPLACE_WITH_D1_ID"

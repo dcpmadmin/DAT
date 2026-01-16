@@ -7,23 +7,11 @@ import './index.css'; // Assuming shared styles
 import { Button } from '@/components/ui/button';
 import { Ruler, Satellite, MousePointer2 } from 'lucide-react';
 
-declare global {
-  interface Window {
-    electron: {
-      ipcRenderer: {
-        on: (channel: string, func: (...args: any[]) => void) => () => void;
-        send: (channel: string, data: any) => void;
-      };
-    };
-  }
-}
-
 const MapApp = () => {
   const [photoSet, setPhotoSet] = useState<PhotoSet | undefined>(undefined);
   const mapRef = useRef<DamageMapHandle | null>(null);
   const [editorMode, setEditorMode] = useState(false);
   const [lastMeasuredDistance, setLastMeasuredDistance] = useState<number | null>(null);
-  const [highlightedPhotoName, setHighlightedPhotoName] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('dm_editor_mode');
@@ -49,19 +37,6 @@ const MapApp = () => {
   };
 
   useEffect(() => {
-    if (window.electron?.ipcRenderer) {
-      const cleanup = window.electron.ipcRenderer.on('damage-map-data', (data: { photoSet: PhotoSet }) => {
-        setPhotoSet(normalizePhotoSet(data.photoSet));
-      });
-
-      const highlightCleanup = window.electron.ipcRenderer.on('highlight-photo-on-map', (photoName: string | null) => {
-        setHighlightedPhotoName(photoName);
-        mapRef.current?.highlightPhoto(photoName);
-      });
-
-      return () => { cleanup(); highlightCleanup(); };
-    }
-
     const readFromStorage = () => {
       try {
         const raw = localStorage.getItem('dm_map_photoSet');
@@ -82,14 +57,10 @@ const MapApp = () => {
   }, []);
 
   const handlePhotoSelect = (type: 'damage' | 'precondition' | 'completion', photo: PhotoMetadata) => {
-    // Optionally send this back to the main window
-    // window.electron.ipcRenderer.send('map-photo-selected', { type, photo });
   };
 
   const handleDistanceChange = (distanceMeters: number, source: 'auto' | 'manual' | 'photo') => {
     setLastMeasuredDistance(distanceMeters);
-    // Optionally send this back to the main window
-    // window.electron.ipcRenderer.send('map-distance-changed', { distanceMeters, source });
   };
 
   if (!photoSet) {
@@ -166,7 +137,6 @@ const MapApp = () => {
         fullHeight={true}
         onPhotoSelect={handlePhotoSelect}
         onDistanceChange={handleDistanceChange}
-        highlightedPhotoName={highlightedPhotoName}
       />
     </div>
   );

@@ -64,6 +64,68 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/e6b9dfaa-3b8f-4777-9bd0-33aebe194a32) and click on Share -> Publish.
 
+## Web-only Deployment (Cloudflare Pages + Workers)
+
+This project is now web-only (no Electron). The API runs as a stateless Worker.
+
+### Local development
+
+Frontend:
+
+```sh
+npm run dev
+```
+
+API (local adapters: filesystem + SQLite):
+
+```sh
+npm run dev:api
+```
+
+The frontend proxies `/api` to `http://localhost:8787`.
+
+### Cloudflare Pages (frontend)
+
+Build settings:
+
+```sh
+# Build command
+npm run build
+
+# Output directory
+dist
+```
+
+Routing:
+
+- Ensure `public/_redirects` contains `/* /index.html 200` for client-side routing.
+- Set `VITE_API_BASE_URL` in Pages environment variables to your Worker URL (e.g. `https://damage-assessor-api.<account>.workers.dev`).
+
+### Cloudflare Workers (API)
+
+1. Configure `wrangler.toml`:
+   - Replace `database_id` with your D1 database ID.
+   - Create the R2 bucket named in `bucket_name`.
+2. Deploy the Worker:
+
+```sh
+npx wrangler deploy
+```
+
+API routes:
+
+- `POST /api/upload` (multipart form, field `file`)
+- `POST /api/assessments` (body: `{ damageId, approval?, metrics? }`)
+- `GET /api/assessments`
+- `GET /api/assessments/:id`
+- `PUT /api/assessments/:id`
+
+### Portability to AWS/Azure
+
+- Object storage adapter: Cloudflare R2 now; replace with S3 or Azure Blob later.
+- SQL adapter: Cloudflare D1 now; replace with Postgres/MySQL later.
+- The adapters live in `worker/adapters/` and are isolated from the handler.
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
