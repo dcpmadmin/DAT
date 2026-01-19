@@ -71,8 +71,8 @@ export const ReportHeader = ({
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Upload
             </Button>
-            <div className="w-8 h-8 bg-primary-foreground/20 rounded-lg flex items-center justify-center">
-              <Search className="w-4 h-4" />
+            <div className="flex items-center">
+              <img src="/dcpm-logo.png" alt="DCPM" className="h-6 w-auto" />
             </div>
             <h1 className="text-lg font-bold">Damage Assessor Tool</h1>
           </div>
