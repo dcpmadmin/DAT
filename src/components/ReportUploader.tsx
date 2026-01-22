@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Upload, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { parseDamageDetailsFile, getDetailsFileHeaders, suggestColumnMapping, DamageDetailsColumnMapping } from '@/utils/damage-details';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,9 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 interface ReportUploaderProps {
   onFilesSelected: (files: FileList, mapping?: DamageDetailsColumnMapping) => void;
   isProcessing: boolean;
+  processingProgress?: { processed: number; total: number } | null;
 }
 
-export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploaderProps) => {
+export const ReportUploader = ({ onFilesSelected, isProcessing, processingProgress }: ReportUploaderProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [summary, setSummary] = useState<{ total: number; images: number; details: number; other: number } | null>(null);
@@ -31,6 +33,7 @@ export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploader
     detailsUnmatched?: number;
     detailsError?: string;
     issues: Array<{ issue: string; damageId: string; detail?: string }>;
+    issueSummary: Array<{ issue: string; count: number }>;
   } | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
 
@@ -136,6 +139,13 @@ export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploader
       issues.push({ issue: 'details_file_error', damageId: '', detail: detailsResult.error });
     }
 
+    const issueSummary = Object.entries(
+      issues.reduce<Record<string, number>>((acc, issue) => {
+        acc[issue.issue] = (acc[issue.issue] || 0) + 1;
+        return acc;
+      }, {})
+    ).map(([issue, count]) => ({ issue, count }));
+
     return {
       reportCount: reportMap.size,
       missingByType,
@@ -145,7 +155,8 @@ export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploader
       detailsMissing: detailsResult.sourceFileName ? detailsMissing : undefined,
       detailsUnmatched: detailsResult.sourceFileName ? detailsUnmatched : undefined,
       detailsError: detailsResult.error,
-      issues
+      issues,
+      issueSummary
     };
   };
 
@@ -292,6 +303,14 @@ export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploader
             </>
           )}
         </Button>
+        {isProcessing && processingProgress && processingProgress.total > 0 && (
+          <div className="w-full max-w-xs mx-auto space-y-1">
+            <Progress value={(processingProgress.processed / processingProgress.total) * 100} className="h-2" />
+            <div className="text-xs text-muted-foreground">
+              {processingProgress.processed} / {processingProgress.total} images processed
+            </div>
+          </div>
+        )}
         <div className="text-xs text-muted-foreground">
           or drag and drop a folder here
         </div>
@@ -431,6 +450,25 @@ export const ReportUploader = ({ onFilesSelected, isProcessing }: ReportUploader
             {preflight.detailsError && (
               <div className="mt-1 text-red-600">
                 Details file error: {preflight.detailsError}
+              </div>
+            )}
+            {preflight.issueSummary.length > 0 && (
+              <div className="mt-2">
+                <div className="font-medium text-foreground">
+                  Issues found: {preflight.issues.length}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {preflight.issueSummary.slice(0, 6).map((item) => (
+                    <span key={`issue-${item.issue}`} className="rounded bg-background px-2 py-0.5 text-xs text-foreground border">
+                      {item.issue.replace(/_/g, ' ')} ({item.count})
+                    </span>
+                  ))}
+                  {preflight.issueSummary.length > 6 && (
+                    <span className="text-xs text-muted-foreground">
+                      +{preflight.issueSummary.length - 6} more
+                    </span>
+                  )}
+                </div>
               </div>
             )}
             {issuesCsv && (

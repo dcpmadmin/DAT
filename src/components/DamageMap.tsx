@@ -19,6 +19,8 @@ interface DamageMapProps {
   onDistanceChange?: (distanceMeters: number, source: 'auto' | 'manual' | 'photo') => void;
   highlightedPhotoName?: string;
   fullHeight?: boolean;
+  height?: number;
+  variant?: 'full' | 'compact';
 }
 
 export type DamageMapHandle = {
@@ -31,7 +33,7 @@ export type DamageMapHandle = {
   highlightPhoto: (photoName: string | null) => void;
 };
 
-export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet, visible, onPhotoSelect, onDistanceChange, highlightedPhotoName, fullHeight }, ref) => {
+export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet, visible, onPhotoSelect, onDistanceChange, highlightedPhotoName, fullHeight, height, variant = 'full' }, ref) => {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [satelliteView, setSatelliteView] = useState(false);
@@ -40,12 +42,13 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
   const [autoDistance, setAutoDistance] = useState<number | null>(null);
   const [selectedPhotoMarkers, setSelectedPhotoMarkers] = useState<{first?: {photo: PhotoMetadata, type: string}, second?: {photo: PhotoMetadata, type: string}}>({});
   const [editorMode, setEditorMode] = useState(false);
-  const [showLabels, setShowLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(variant !== 'compact');
   const [photoTypeFilter, setPhotoTypeFilter] = useState<'all' | 'damage' | 'precondition' | 'completion'>('all');
-  const [showAutoDistance, setShowAutoDistance] = useState(true);
+  const [showAutoDistance, setShowAutoDistance] = useState(variant !== 'compact');
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
   const originalIcons = useRef<Record<string, L.DivIcon>>({});
   const markersRef = useRef<L.Marker[]>([]);
+  const isCompact = variant === 'compact';
 
   // Persist editor mode across re-mounts so tools don't "disappear"
   useEffect(() => {
@@ -56,18 +59,6 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
   useEffect(() => {
     localStorage.setItem('dm_editor_mode', editorMode ? '1' : '0');
   }, [editorMode]);
-
-  // Debug logging
-  console.log('DamageMap render:', { 
-    photoSet: photoSet?.damageId, 
-    visible, 
-    damagePhotos: photoSet?.damagePhotos?.length,
-    preconditionPhotos: photoSet?.preconditionPhotos?.length,
-    completionPhotos: photoSet?.completionPhotos?.length,
-    hasLocation: photoSet?.damagePhotos?.some(p => p.location),
-    mapContainerRef: !!mapContainerRef.current,
-    mapRef: !!mapRef.current
-  });
 
   useEffect(() => {
     if (!visible || !mapContainerRef.current) return;
@@ -757,51 +748,55 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
     );
   }
 
-  const mapHeight = fullHeight ? '100vh' : '500px';
+  const mapHeight = fullHeight ? '100vh' : `${height ?? 500}px`;
 
   return (
     <div className="h-full w-full relative" style={{ height: mapHeight, minHeight: mapHeight }}>
-      <Card className="h-full overflow-hidden shadow-map relative" style={{ height: mapHeight, minHeight: mapHeight }}>
-        <div className="p-3 border-b border-white/10 bg-slate-900/80 text-white backdrop-blur-md relative z-50 shadow-sm">
+      <Card className="h-full overflow-hidden shadow-map relative flex flex-col" style={{ height: mapHeight, minHeight: mapHeight }}>
+        <div className={`border-b border-white/10 bg-slate-900/80 text-white backdrop-blur-md relative z-50 shadow-sm ${isCompact ? 'px-2 py-2' : 'p-3'}`}>
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-semibold">Photo Locations & Measurements</h3>
-              <div className="flex gap-4 text-xs mt-1 flex-wrap text-white/80">
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 bg-damage rounded-full border border-white"></div>
-                  <span>Damage ({photoSet?.damagePhotos.filter(p => p.location).length || 0})</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 bg-precondition rounded-full border border-white"></div>
-                  <span>Precondition ({photoSet?.preconditionPhotos.filter(p => p.location).length || 0})</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 bg-completion rounded-full border border-white"></div>
-                  <span>Completion ({photoSet?.completionPhotos.filter(p => p.location).length || 0})</span>
-                </div>
-                {autoDistance && showAutoDistance && (
-                  <div className="flex items-center gap-1 ml-4 bg-white/10 px-2 py-1 rounded">
-                    <span className="font-medium text-white">Auto Distance: {autoDistance.toFixed(1)}m</span>
+              <h3 className={`font-semibold ${isCompact ? 'text-xs' : 'text-sm'}`}>Photo Locations</h3>
+              {!isCompact && (
+                <div className="flex gap-4 text-xs mt-1 flex-wrap text-white/80">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-damage rounded-full border border-white"></div>
+                    <span>Damage ({photoSet?.damagePhotos.filter(p => p.location).length || 0})</span>
                   </div>
-                )}
-              </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-precondition rounded-full border border-white"></div>
+                    <span>Precondition ({photoSet?.preconditionPhotos.filter(p => p.location).length || 0})</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-completion rounded-full border border-white"></div>
+                    <span>Completion ({photoSet?.completionPhotos.filter(p => p.location).length || 0})</span>
+                  </div>
+                  {autoDistance && showAutoDistance && (
+                    <div className="flex items-center gap-1 ml-4 bg-white/10 px-2 py-1 rounded">
+                      <span className="font-medium text-white">Auto Distance: {autoDistance.toFixed(1)}m</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex gap-2 relative z-50 flex-wrap">
               {/* Toggle Labels */}
-              <button
-                onClick={() => setShowLabels(!showLabels)}
-                className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded transition-colors text-white border border-white/20"
-                title="Toggle photo labels"
-              >
-                {showLabels ? 'Hide Labels' : 'Show Labels'}
-              </button>
+              {!isCompact && (
+                <button
+                  onClick={() => setShowLabels(!showLabels)}
+                  className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded transition-colors text-white border border-white/20"
+                  title="Toggle photo labels"
+                >
+                  {showLabels ? 'Hide Labels' : 'Show Labels'}
+                </button>
+              )}
               
               {/* Filter by Photo Type */}
               <select
                 value={photoTypeFilter}
                 onChange={(e) => setPhotoTypeFilter(e.target.value as any)}
-                className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded transition-colors text-white border border-white/20"
+                className="px-2 py-1 text-xs bg-white/10 hover:bg-white/20 rounded transition-colors text-white border border-white/20"
                 title="Filter photos by type"
               >
                 <option value="all" className="text-slate-900 bg-white">All Photos</option>
@@ -811,20 +806,22 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
               </select>
               
               {/* Manual Measurement Toggle */}
-              <button
-                onClick={() => toggleMeasurement()}
-                className={`px-3 py-1.5 text-xs rounded transition-colors text-white border border-white/20 ${
-                  measuring 
-                    ? 'bg-red-500/80 hover:bg-red-500 text-white' 
-                    : 'bg-white/10 hover:bg-white/20'
-                }`}
-                title="Click two points on map to measure distance"
-              >
-                {measuring ? 'Stop Measuring' : 'Measure Distance'}
-              </button>
+              {!isCompact && (
+                <button
+                  onClick={() => toggleMeasurement()}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors text-white border border-white/20 ${
+                    measuring 
+                      ? 'bg-red-500/80 hover:bg-red-500 text-white' 
+                      : 'bg-white/10 hover:bg-white/20'
+                  }`}
+                  title="Click two points on map to measure distance"
+                >
+                  {measuring ? 'Stop Measuring' : 'Measure Distance'}
+                </button>
+              )}
               
               {/* Clear Measurements Button */}
-              {hasMeasurements() && (
+              {!isCompact && hasMeasurements() && (
                 <button
                   onClick={() => clearMeasurements()}
                   className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded transition-colors text-white border border-white/20"
@@ -835,7 +832,7 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
               )}
               
               {/* Toggle Auto Distance */}
-              {autoDistance !== null && (
+              {!isCompact && autoDistance !== null && (
                 <button
                   onClick={() => setShowAutoDistance(!showAutoDistance)}
                   className={`px-3 py-1.5 text-xs rounded transition-colors text-white border border-white/20 ${
@@ -852,7 +849,7 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
               {/* Satellite View Toggle */}
               <button
                 onClick={() => toggleSatelliteView()}
-                className={`px-3 py-1.5 text-xs rounded transition-colors text-white border border-white/20 ${
+                className={`px-2 py-1 text-xs rounded transition-colors text-white border border-white/20 ${
                   satelliteView 
                     ? 'bg-blue-500/80 hover:bg-blue-500 text-white' 
                     : 'bg-white/10 hover:bg-white/20'
@@ -866,11 +863,7 @@ export const DamageMap = forwardRef<DamageMapHandle, DamageMapProps>(({ photoSet
         </div>
         <div
           ref={mapContainerRef}
-          className="w-full relative z-10"
-          style={{
-            height: fullHeight ? 'calc(100vh - 80px)' : 'calc(500px - 80px)',
-            minHeight: fullHeight ? 'calc(100vh - 80px)' : '420px'
-          }}
+          className="w-full relative z-10 flex-1"
         />
       </Card>
     </div>

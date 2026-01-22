@@ -1,5 +1,4 @@
-import { Search, ChevronLeft, ChevronRight, Map, ArrowLeft, FileSpreadsheet, HelpCircle, Upload, Download } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Search, ChevronLeft, ChevronRight, Map, ArrowLeft, FileSpreadsheet, Upload, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -18,6 +17,10 @@ interface ReportHeaderProps {
   onToggleGallery: (gallery: GalleryType, visible: boolean) => void;
   galleryVisibility: Record<GalleryType, boolean>;
   onToggleMap: () => void;
+  mapVisible?: boolean;
+  jumpOptions?: string[];
+  jumpValue?: string;
+  onJumpTo?: (damageId: string) => void;
   onReset: () => void;
   onToggleReportGenerator: () => void;
   showReportGenerator: boolean;
@@ -40,6 +43,10 @@ export const ReportHeader = ({
   onToggleGallery,
   galleryVisibility,
   onToggleMap,
+  mapVisible = true,
+  jumpOptions = [],
+  jumpValue,
+  onJumpTo,
   onReset,
   onToggleReportGenerator,
   showReportGenerator,
@@ -57,10 +64,10 @@ export const ReportHeader = ({
   const isMissingDamagePhotos = currentSet ? currentSet.damagePhotos.length === 0 : false;
 
   return (
-    <Card className="bg-gradient-header text-primary-foreground shadow-card">
+    <Card className="bg-gradient-header text-primary-foreground shadow-card p-2">
       <div className="flex flex-col gap-2">
         {/* Top row: Title and controls */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
@@ -74,29 +81,19 @@ export const ReportHeader = ({
             <div className="flex items-center">
               <img src="/dcpm-logo.png" alt="DCPM" className="h-6 w-auto" />
             </div>
-            <h1 className="text-lg font-bold">Damage Assessor Tool</h1>
+            <h1 className="text-base font-bold">Damage Assessor Tool</h1>
           </div>
           
           <div className="flex gap-2">
-            <Link to="/how-to" className="inline-flex">
-              <Button
-                asChild
-                variant="ghost"
-                size="sm"
-                className="text-primary-foreground hover:bg-primary-foreground/20"
-              >
-                <span className="inline-flex items-center"><HelpCircle className="w-4 h-4 mr-2" /> How to Use</span>
-              </Button>
-            </Link>
             <Button
               variant="ghost"
               size="sm"
               onClick={onToggleMap}
-              className="text-primary-foreground hover:bg-primary-foreground/20"
-              title="Open map window"
+              className={`text-primary-foreground hover:bg-primary-foreground/20 ${mapVisible ? 'bg-primary-foreground/20' : ''}`}
+              title="Toggle mini map"
             >
               <Map className="w-4 h-4 mr-2" />
-              Map
+              {mapVisible ? 'Hide Map' : 'Show Map'}
             </Button>
 
             {showInternalControls && (
@@ -150,16 +147,34 @@ export const ReportHeader = ({
         )}
 
         {/* Middle row: Search and navigation */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex-1 max-w-md relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search damage reports..."
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="pl-10 bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground placeholder:text-primary-foreground/70"
+              className="pl-10 h-8 bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground placeholder:text-primary-foreground/70 text-sm"
             />
           </div>
+
+          {jumpOptions.length > 0 && onJumpTo && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-primary-foreground/80">Jump to:</span>
+              <Select value={jumpValue || ''} onValueChange={onJumpTo}>
+                <SelectTrigger className="h-8 w-40 bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground text-sm">
+                  <SelectValue placeholder="Select ID" />
+                </SelectTrigger>
+                <SelectContent className="z-[1300] bg-background" position="popper">
+                  {jumpOptions.map((damageId) => (
+                    <SelectItem key={`jump-${damageId}`} value={damageId}>
+                      {damageId}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {currentSet && (
             <div className="flex items-center gap-2">
@@ -174,7 +189,7 @@ export const ReportHeader = ({
                 Previous
               </Button>
               
-              <span className="text-sm font-medium px-3 py-1 bg-primary-foreground/20 rounded">
+              <span className="text-xs font-medium px-2 py-1 bg-primary-foreground/20 rounded">
                 {(filteredPosition >= 0 ? filteredPosition + 1 : 0)} of {filteredCount}
               </span>
               
@@ -193,9 +208,9 @@ export const ReportHeader = ({
 
           {showInternalControls && (
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-sm text-primary-foreground/80">Filter status:</span>
+              <span className="text-xs text-primary-foreground/80">Filter status:</span>
               <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-                <SelectTrigger className="h-8 w-36 bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground">
+                <SelectTrigger className="h-8 w-32 bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="z-[1300] bg-background" position="popper">
@@ -212,10 +227,10 @@ export const ReportHeader = ({
 
         {/* Bottom row: Current report info and gallery toggles */}
         {currentSet && (
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between flex-wrap gap-2">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold">Report: {currentSet.damageId}</h2>
-              <div className="text-sm text-primary-foreground/80 flex gap-4">
+              <h2 className="text-sm font-semibold">Report: {currentSet.damageId}</h2>
+              <div className="text-xs text-primary-foreground/80 flex gap-3 flex-wrap">
                 <span>Damage: {currentSet.damagePhotos.length} photos</span>
                 <span>Precondition: {currentSet.preconditionPhotos.length} photos</span>
                 <span>Completion: {currentSet.completionPhotos.length} photos</span>
@@ -232,7 +247,7 @@ export const ReportHeader = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Gallery View:</span>
+              <span className="text-xs font-medium">Gallery View:</span>
               {(['precondition', 'damage', 'completion'] as GalleryType[]).map((gallery) => (
                 <div key={gallery} className="flex items-center gap-2">
                   <Checkbox

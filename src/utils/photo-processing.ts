@@ -79,23 +79,29 @@ export async function extractPhotoMetadata(file: File): Promise<PhotoMetadata> {
 /**
  * Process uploaded folder structure and group photos by damage ID
  */
-export async function processFolderStructure(files: FileList): Promise<PhotoSet[]> {
+export async function processFolderStructure(
+  files: FileList,
+  onProgress?: (progress: { processed: number; total: number }) => void
+): Promise<PhotoSet[]> {
   const photoSets = new Map<string, {
     damage: PhotoMetadata[];
     precondition: PhotoMetadata[];
     completion: PhotoMetadata[];
   }>();
 
+  const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+  const totalImages = imageFiles.length;
+  let processedImages = 0;
+  onProgress?.({ processed: processedImages, total: totalImages });
+
   // Process each file
-  for (const file of Array.from(files)) {
-    // Skip non-image files
-    if (!file.type.startsWith('image/')) {
-      continue;
-    }
+  for (const file of imageFiles) {
 
     const pathParts = file.webkitRelativePath.split('/');
     if (pathParts.length < 3) {
       console.warn(`Skipping file with unexpected path structure: ${file.webkitRelativePath}`);
+      processedImages += 1;
+      onProgress?.({ processed: processedImages, total: totalImages });
       continue;
     }
 
@@ -154,6 +160,8 @@ export async function processFolderStructure(files: FileList): Promise<PhotoSet[
 
     const photoMetadata = await extractPhotoMetadata(file);
     const set = photoSets.get(damageId)!;
+    processedImages += 1;
+    onProgress?.({ processed: processedImages, total: totalImages });
 
     // Categorize by folder name - more flexible matching
     if (!photoTypeFolder) {
@@ -220,7 +228,6 @@ export async function processFolderStructure(files: FileList): Promise<PhotoSet[
           );
           return distanceA - distanceB;
         })
-        .slice(0, 10)
         .concat(photos.precondition.filter(photo => !photo.location)); // Add photos without GPS at the end
 
       selectedCompletion = photos.completion
@@ -240,7 +247,6 @@ export async function processFolderStructure(files: FileList): Promise<PhotoSet[
           );
           return distanceA - distanceB;
         })
-        .slice(0, 10)
         .concat(photos.completion.filter(photo => !photo.location)); // Add photos without GPS at the end
     }
 

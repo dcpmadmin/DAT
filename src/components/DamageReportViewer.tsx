@@ -1,11 +1,12 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ReportUploader } from './ReportUploader';
 import { DashboardHome } from './DashboardHome';
 import { ReportHeader } from './ReportHeader';
 import { PhotoGallery } from './PhotoGallery';
 import { ReportGenerator } from './ReportGenerator';
 import { ApprovalControls } from './ApprovalControls';
-import { PhotoSet, GalleryType, DamageReportState, PhotoMetadata, PhotoSetApproval } from '@/types/damage-report';
+import { DamageMap } from './DamageMap';
+import { GalleryType, DamageReportState, PhotoMetadata, PhotoSetApproval } from '@/types/damage-report';
 import { processFolderStructure } from '@/utils/photo-processing';
 import { parseDamageDetailsFile, DamageDetailsColumnMapping } from '@/utils/damage-details';
 import { listAssessments, upsertAssessment } from '@/api/client';
@@ -13,6 +14,7 @@ import type { AssessmentUpsert, SerializedApproval } from '@/shared/assessment';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 interface ReportMetrics {
   distanceMeters?: number;
@@ -36,14 +38,19 @@ export const DamageReportViewer = ({ mode = 'internal' }: DamageReportViewerProp
     searchTerm: '',
     approvals: {}
   });
-const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [showReportGenerator, setShowReportGenerator] = useState(false);
-  const [editorMode, setEditorMode] = useState(false);
   const [metricsById, setMetricsById] = useState<Record<string, ReportMetrics>>({});
   const [lastMeasuredDistance, setLastMeasuredDistance] = useState<number | null>(null);
   const [showOverview, setShowOverview] = useState(true);
-  const mapWindowRef = useRef<Window | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'rejected' | 'query' | 'pending'>('all');
+  const [showMiniMap, setShowMiniMap] = useState(true);
+  const [mapPanelOpen, setMapPanelOpen] = useState(true);
+  const [processingProgress, setProcessingProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [panelWidth, setPanelWidth] = useState(360);
+  const [isLargeScreen, setIsLargeScreen] = useState(() => window.innerWidth >= 1024);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const resizingRef = useRef(false);
   const [detailsSummary, setDetailsSummary] = useState<{
     sourceFileName: string;
     matchedCount: number;
@@ -69,18 +76,18 @@ const [isProcessing, setIsProcessing] = useState(false);
     }, []);
   }, [state.photoSets, state.approvals, statusFilter, state.searchTerm]);
   const filteredPosition = filteredIndices.indexOf(state.currentSetIndex);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('dm_editor_mode');
-    if (saved === '1') setEditorMode(true);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('dm_editor_mode', editorMode ? '1' : '0');
-  }, [editorMode]);
+  const jumpOptions = useMemo(() => {
+    return filteredIndices.map((index) => state.photoSets[index].damageId);
+  }, [filteredIndices, state.photoSets]);
 
   const handleFilesSelected = useCallback(async (files: FileList, mapping?: DamageDetailsColumnMapping) => {
     setIsProcessing(true);
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length > 0) {
+      setProcessingProgress({ processed: 0, total: imageFiles.length });
+    } else {
+      setProcessingProgress(null);
+    }
     try {
       const detailsResult = await parseDamageDetailsFile(files, mapping);
       if (detailsResult.error) {
@@ -92,7 +99,9 @@ const [isProcessing, setIsProcessing] = useState(false);
         try { localStorage.setItem('dm_details_mapping', JSON.stringify(mapping)); } catch {}
       }
 
-      const photoSets = await processFolderStructure(files);
+      const photoSets = await processFolderStructure(files, (progress) => {
+        setProcessingProgress(progress);
+      });
       const photoSetsWithDetails = photoSets.map((photoSet) => ({
         ...photoSet,
         damageDetails: detailsResult.detailsById[photoSet.damageId]
@@ -196,6 +205,7 @@ const [isProcessing, setIsProcessing] = useState(false);
       toast.error('Failed to process uploaded files. Please check the folder structure.');
     } finally {
       setIsProcessing(false);
+      setProcessingProgress(null);
     }
   }, []);
 
@@ -261,6 +271,11 @@ const [isProcessing, setIsProcessing] = useState(false);
     updateCurrentSet(filteredIndices[currentPos + 1]);
   }, [filteredIndices, state.currentSetIndex, updateCurrentSet]);
 
+  const handleJumpTo = useCallback((damageId: string) => {
+    const index = state.photoSets.findIndex((set) => set.damageId === damageId);
+    if (index >= 0) updateCurrentSet(index);
+  }, [state.photoSets, updateCurrentSet]);
+
   const handleToggleGallery = useCallback((gallery: GalleryType, visible: boolean) => {
     setState(prev => ({
       ...prev,
@@ -271,58 +286,9 @@ const [isProcessing, setIsProcessing] = useState(false);
     }));
   }, []);
 
-  const buildMapPayload = useCallback((set: PhotoSet) => {
-    return {
-      damageId: set.damageId,
-      damagePhotos: set.damagePhotos.map(p => ({
-        name: p.name,
-        url: '',
-        location: p.location,
-        orientation: p.orientation,
-        timestamp: p.timestamp
-      })),
-      preconditionPhotos: set.preconditionPhotos.map(p => ({
-        name: p.name,
-        url: '',
-        location: p.location,
-        orientation: p.orientation,
-        timestamp: p.timestamp
-      })),
-      completionPhotos: set.completionPhotos.map(p => ({
-        name: p.name,
-        url: '',
-        location: p.location,
-        orientation: p.orientation,
-        timestamp: p.timestamp
-      })),
-      referenceLocation: set.referenceLocation
-    };
-  }, []);
-
   const handleToggleMap = useCallback(() => {
-    if (!currentSet) {
-      toast.error("Please upload photos first.");
-      return;
-    }
-    try {
-      const mapPayload = buildMapPayload(currentSet);
-      localStorage.setItem('dm_map_photoSet', JSON.stringify(mapPayload));
-      localStorage.setItem('dm_map_photoSet_updatedAt', new Date().toISOString());
-      const width = Math.min(1200, window.innerWidth - 40);
-      const height = Math.min(800, window.innerHeight - 40);
-      const left = Math.max(20, Math.round((window.innerWidth - width) / 2));
-      const top = Math.max(20, Math.round((window.innerHeight - height) / 2));
-      const features = `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
-      if (mapWindowRef.current && !mapWindowRef.current.closed) {
-        mapWindowRef.current.focus();
-      } else {
-        mapWindowRef.current = window.open('/map.html', 'damage-map', features);
-      }
-    } catch (error) {
-      console.error('Failed to open map tab:', error);
-      toast.error('Failed to open map in a new tab.');
-    }
-  }, [currentSet, buildMapPayload]);
+    setShowMiniMap((prev) => !prev);
+  }, []);
 
   const handlePhotoSelect = useCallback((gallery: GalleryType, photo: PhotoMetadata) => {
     setState(prev => ({
@@ -399,6 +365,8 @@ const [isProcessing, setIsProcessing] = useState(false);
     setStatusFilter('all');
     setDetailsSummary(null);
     setShowOverview(true);
+    setShowMiniMap(true);
+    setMapPanelOpen(true);
   }, []);
 
   const handleApprovalChange = useCallback((damageId: string, approval: PhotoSetApproval) => {
@@ -456,6 +424,99 @@ const [isProcessing, setIsProcessing] = useState(false);
 
   const handleDistanceChange = useCallback((distance: number) => { setLastMeasuredDistance(distance); }, []);
 
+  useEffect(() => {
+    const onResize = () => {
+      setIsLargeScreen(window.innerWidth >= 1024);
+      if (!layoutRef.current) return;
+      const bounds = layoutRef.current.getBoundingClientRect();
+      const minPanel = 280;
+      const minLeft = 720;
+      const maxPanel = Math.max(minPanel, bounds.width - minLeft);
+      setPanelWidth((prev) => Math.min(maxPanel, Math.max(minPanel, prev)));
+    };
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      if (!resizingRef.current || !layoutRef.current) return;
+      const bounds = layoutRef.current.getBoundingClientRect();
+      const minPanel = 280;
+      const minLeft = 720;
+      const maxPanel = Math.max(minPanel, bounds.width - minLeft);
+      const next = Math.min(maxPanel, Math.max(minPanel, bounds.right - event.clientX));
+      setPanelWidth(next);
+    };
+    const onMouseUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  const handleResizeStart = (event: React.MouseEvent) => {
+    if (!isLargeScreen) return;
+    resizingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    event.preventDefault();
+  };
+
+  const applyQuickStatus = useCallback((status: PhotoSetApproval['status']) => {
+    if (!currentSet) return;
+    const existing = state.approvals[currentSet.damageId];
+    const approval: PhotoSetApproval = {
+      status,
+      comments: existing?.comments || '',
+      timestamp: new Date(),
+      severity: existing?.severity,
+      priority: existing?.priority,
+      confidence: existing?.confidence,
+      followUp: existing?.followUp || '',
+      notes: existing?.notes || '',
+      estimateDays: existing?.estimateDays,
+      costRangeAud: existing?.costRangeAud
+    };
+    handleApprovalChange(currentSet.damageId, approval);
+  }, [currentSet, state.approvals, handleApprovalChange]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        handlePreviousReport();
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        handleNextReport();
+        return;
+      }
+      if (isGuest || !currentSet) return;
+      const key = event.key.toLowerCase();
+      if (key === 'a') applyQuickStatus('approved');
+      if (key === 'q') applyQuickStatus('query');
+      if (key === 'r') applyQuickStatus('rejected');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [applyQuickStatus, currentSet, handleNextReport, handlePreviousReport, isGuest]);
+
 
   useEffect(() => {
     if (filteredIndices.length === 0) return;
@@ -463,17 +524,6 @@ const [isProcessing, setIsProcessing] = useState(false);
       updateCurrentSet(filteredIndices[0]);
     }
   }, [filteredIndices, state.currentSetIndex, updateCurrentSet]);
-
-  useEffect(() => {
-    if (!currentSet) return;
-    if (mapWindowRef.current && !mapWindowRef.current.closed) {
-      const mapPayload = buildMapPayload(currentSet);
-      try {
-        localStorage.setItem('dm_map_photoSet', JSON.stringify(mapPayload));
-        localStorage.setItem('dm_map_photoSet_updatedAt', new Date().toISOString());
-      } catch {}
-    }
-  }, [currentSet, buildMapPayload]);
 
   const handleExportSession = useCallback(() => {
     const payload = {
@@ -590,7 +640,7 @@ const [isProcessing, setIsProcessing] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto w-full max-w-[1800px] px-4">
+      <div className="mx-auto w-full max-w-none px-3">
         {/* Upload Section or Header */}
         {state.photoSets.length === 0 ? (
           <div className="space-y-6">
@@ -599,7 +649,8 @@ const [isProcessing, setIsProcessing] = useState(false);
               <div className="w-full max-w-2xl">
                 <ReportUploader 
                   onFilesSelected={handleFilesSelected} 
-                  isProcessing={isProcessing} 
+                  isProcessing={isProcessing}
+                  processingProgress={processingProgress}
                 />
               </div>
             </div>
@@ -616,6 +667,10 @@ const [isProcessing, setIsProcessing] = useState(false);
               onToggleGallery={handleToggleGallery}
               galleryVisibility={galleryVisibility}
               onToggleMap={handleToggleMap}
+              mapVisible={showMiniMap}
+              jumpOptions={jumpOptions}
+              jumpValue={currentSet?.damageId}
+              onJumpTo={handleJumpTo}
               onReset={handleReset}
               onToggleReportGenerator={() => setShowReportGenerator(!showReportGenerator)}
               showReportGenerator={showReportGenerator}
@@ -640,8 +695,8 @@ const [isProcessing, setIsProcessing] = useState(false);
               </Dialog>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-[4fr_1fr] gap-4">
-              <div className="space-y-4">
+            <div ref={layoutRef} className="flex flex-col gap-2 lg:flex-row lg:gap-0">
+              <div className="space-y-2 flex-1 min-w-0 lg:pr-2">
                 {!isGuest && (
                   <div>
                     <div className="flex justify-end">
@@ -662,63 +717,102 @@ const [isProcessing, setIsProcessing] = useState(false);
                 )}
 
                 {/* Photo Galleries */}
-                <div className={`grid gap-4 ${
-                  visibleGalleries === 1 ? 'grid-cols-1' :
-                  visibleGalleries === 2 ? 'grid-cols-2' : 
-                  'grid-cols-3'
-                }`} style={{ 
-                  minHeight: '760px',
-                  gridTemplateColumns: visibleGalleries === 3 ? '1fr 1fr 1fr' : undefined,
-                  maxWidth: '100%'
-                }}>
-                  <PhotoGallery
-                    type="precondition"
-                    photos={state.galleries.precondition.candidatePhotos}
-                    selectedPhoto={state.galleries.precondition.selectedPhoto}
-                    onPhotoSelect={(photo) => handlePhotoSelect('precondition', photo)}
-                    rotation={state.galleries.precondition.rotation}
-                    zoom={state.galleries.precondition.zoom}
-                    panX={state.galleries.precondition.panX}
-                    panY={state.galleries.precondition.panY}
-                    onRotate={() => handleRotate('precondition')}
-                    onZoomToggle={() => handleZoomToggle('precondition')}
-                    onPan={(deltaX, deltaY) => handlePan('precondition', deltaX, deltaY)}
-                    visible={state.galleries.precondition.visible}
-                  />
+                <div className="relative">
+                  <div className={`grid gap-2 ${
+                    visibleGalleries === 1 ? 'grid-cols-1' :
+                    visibleGalleries === 2 ? 'grid-cols-2' :
+                    'grid-cols-3'
+                  }`} style={{
+                    minHeight: '72vh',
+                    gridTemplateColumns: visibleGalleries === 3 ? '1fr 1fr 1fr' : undefined,
+                    maxWidth: '100%'
+                  }}>
+                    <PhotoGallery
+                      type="precondition"
+                      photos={state.galleries.precondition.candidatePhotos}
+                      selectedPhoto={state.galleries.precondition.selectedPhoto}
+                      onPhotoSelect={(photo) => handlePhotoSelect('precondition', photo)}
+                      rotation={state.galleries.precondition.rotation}
+                      zoom={state.galleries.precondition.zoom}
+                      panX={state.galleries.precondition.panX}
+                      panY={state.galleries.precondition.panY}
+                      onRotate={() => handleRotate('precondition')}
+                      onZoomToggle={() => handleZoomToggle('precondition')}
+                      onPan={(deltaX, deltaY) => handlePan('precondition', deltaX, deltaY)}
+                      visible={state.galleries.precondition.visible}
+                    />
 
-                  <PhotoGallery
-                    type="damage"
-                    photos={state.galleries.damage.candidatePhotos}
-                    selectedPhoto={state.galleries.damage.selectedPhoto}
-                    onPhotoSelect={(photo) => handlePhotoSelect('damage', photo)}
-                    rotation={state.galleries.damage.rotation}
-                    zoom={state.galleries.damage.zoom}
-                    panX={state.galleries.damage.panX}
-                    panY={state.galleries.damage.panY}
-                    onRotate={() => handleRotate('damage')}
-                    onZoomToggle={() => handleZoomToggle('damage')}
-                    onPan={(deltaX, deltaY) => handlePan('damage', deltaX, deltaY)}
-                    visible={state.galleries.damage.visible}
-                  />
+                    <PhotoGallery
+                      type="damage"
+                      photos={state.galleries.damage.candidatePhotos}
+                      selectedPhoto={state.galleries.damage.selectedPhoto}
+                      onPhotoSelect={(photo) => handlePhotoSelect('damage', photo)}
+                      rotation={state.galleries.damage.rotation}
+                      zoom={state.galleries.damage.zoom}
+                      panX={state.galleries.damage.panX}
+                      panY={state.galleries.damage.panY}
+                      onRotate={() => handleRotate('damage')}
+                      onZoomToggle={() => handleZoomToggle('damage')}
+                      onPan={(deltaX, deltaY) => handlePan('damage', deltaX, deltaY)}
+                      visible={state.galleries.damage.visible}
+                    />
 
-                  <PhotoGallery
-                    type="completion"
-                    photos={state.galleries.completion.candidatePhotos}
-                    selectedPhoto={state.galleries.completion.selectedPhoto}
-                    onPhotoSelect={(photo) => handlePhotoSelect('completion', photo)}
-                    rotation={state.galleries.completion.rotation}
-                    zoom={state.galleries.completion.zoom}
-                    panX={state.galleries.completion.panX}
-                    panY={state.galleries.completion.panY}
-                    onRotate={() => handleRotate('completion')}
-                    onZoomToggle={() => handleZoomToggle('completion')}
-                    onPan={(deltaX, deltaY) => handlePan('completion', deltaX, deltaY)}
-                    visible={state.galleries.completion.visible}
-                  />
+                    <PhotoGallery
+                      type="completion"
+                      photos={state.galleries.completion.candidatePhotos}
+                      selectedPhoto={state.galleries.completion.selectedPhoto}
+                      onPhotoSelect={(photo) => handlePhotoSelect('completion', photo)}
+                      rotation={state.galleries.completion.rotation}
+                      zoom={state.galleries.completion.zoom}
+                      panX={state.galleries.completion.panX}
+                      panY={state.galleries.completion.panY}
+                      onRotate={() => handleRotate('completion')}
+                      onZoomToggle={() => handleZoomToggle('completion')}
+                      onPan={(deltaX, deltaY) => handlePan('completion', deltaX, deltaY)}
+                      visible={state.galleries.completion.visible}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-4 lg:max-h-[calc(100vh-240px)] lg:overflow-auto">
+              <div
+                className="hidden lg:flex w-2 cursor-col-resize items-stretch"
+                onMouseDown={handleResizeStart}
+                role="separator"
+                aria-orientation="vertical"
+                title="Drag to resize panel"
+              >
+                <div className="w-px bg-border/60 mx-auto" />
+              </div>
+
+              <div
+                className="space-y-2 w-full lg:pl-2 lg:max-h-[calc(100vh-200px)] lg:overflow-auto"
+                style={isLargeScreen ? { width: panelWidth } : undefined}
+              >
+                {showMiniMap && currentSet && (
+                  <Collapsible open={mapPanelOpen} onOpenChange={setMapPanelOpen}>
+                    <div className="rounded-lg border bg-card p-2 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-medium text-muted-foreground">Map Overview</div>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            {mapPanelOpen ? 'Hide' : 'Show'}
+                          </Button>
+                        </CollapsibleTrigger>
+                      </div>
+                      <CollapsibleContent className="mt-2">
+                        <DamageMap
+                          photoSet={currentSet}
+                          visible={showMiniMap}
+                          onPhotoSelect={handlePhotoSelect}
+                          onDistanceChange={(distanceMeters, _source) => handleDistanceChange(distanceMeters)}
+                          height={300}
+                          variant="compact"
+                        />
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                )}
                 {/* Inline Approval Controls */}
                 {currentSet && !isGuest && (
                   <>

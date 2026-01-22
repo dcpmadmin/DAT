@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { RotateCw, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -37,6 +37,14 @@ export const PhotoGallery = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
+  const thumbContainerRef = useRef<HTMLDivElement>(null);
+  const [thumbRange, setThumbRange] = useState({ start: 0, end: 0 });
+  const [isImageLoading, setIsImageLoading] = useState(false);
+
+  const THUMB_SIZE = 48;
+  const THUMB_GAP = 6;
+  const THUMB_ITEM = THUMB_SIZE + THUMB_GAP;
+  const THUMB_BUFFER = 6;
 
   const getTypeColor = (type: GalleryType) => {
     switch (type) {
@@ -85,6 +93,55 @@ export const PhotoGallery = ({
     }
   };
 
+  const updateThumbRange = useCallback(() => {
+    const container = thumbContainerRef.current;
+    if (!container) return;
+    const width = container.clientWidth;
+    const scrollLeft = container.scrollLeft;
+    const start = Math.max(0, Math.floor(scrollLeft / THUMB_ITEM) - THUMB_BUFFER);
+    const end = Math.min(
+      photos.length,
+      Math.ceil((scrollLeft + width) / THUMB_ITEM) + THUMB_BUFFER
+    );
+    setThumbRange((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+  }, [photos.length]);
+
+  useEffect(() => {
+    updateThumbRange();
+    const container = thumbContainerRef.current;
+    if (!container) return;
+    let rafId = 0;
+    const onScroll = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateThumbRange);
+    };
+    container.addEventListener('scroll', onScroll);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [updateThumbRange]);
+
+  useEffect(() => {
+    if (selectedPhoto) setIsImageLoading(true);
+  }, [selectedPhoto?.name]);
+
+  useEffect(() => {
+    const container = thumbContainerRef.current;
+    if (!container || !selectedPhoto) return;
+    const index = photos.findIndex((photo) => photo.name === selectedPhoto.name);
+    if (index < 0) return;
+    const itemStart = index * THUMB_ITEM;
+    const itemEnd = itemStart + THUMB_SIZE;
+    if (itemStart < container.scrollLeft) {
+      container.scrollLeft = itemStart;
+    } else if (itemEnd > container.scrollLeft + container.clientWidth) {
+      container.scrollLeft = itemEnd - container.clientWidth;
+    }
+  }, [selectedPhoto, photos]);
+
   if (!visible) return null;
 
   const getTypeStyles = () => {
@@ -121,14 +178,18 @@ export const PhotoGallery = ({
   };
 
   const styles = getTypeStyles();
+  const range = thumbRange.end > 0 ? thumbRange : { start: 0, end: Math.min(photos.length, 24) };
+  const visiblePhotos = photos.slice(range.start, range.end);
+  const paddingLeft = range.start * THUMB_ITEM;
+  const paddingRight = (photos.length - range.end) * THUMB_ITEM;
 
   return (
-    <Card className="flex-1 bg-card shadow-lg overflow-hidden flex flex-col border h-full" style={{ minHeight: '500px' }}>
+    <Card className="flex-1 bg-card shadow-lg overflow-hidden flex flex-col border h-full" style={{ minHeight: '640px' }}>
       {/* Improved Header */}
-      <div className={`p-3 border-b ${styles.bg} ${styles.text} shadow-sm`}>
+      <div className={`p-2 border-b ${styles.bg} ${styles.text} shadow-sm`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-base capitalize tracking-wide">{type}</h3>
+            <h3 className="font-semibold text-sm capitalize tracking-wide">{type}</h3>
             {photos.length > 0 && (
               <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">
                 {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
@@ -162,7 +223,7 @@ export const PhotoGallery = ({
               size="sm"
               onClick={onRotate}
               className={`${styles.text} ${styles.hover} h-7 w-7 p-0`}
-              title="Rotate 90°"
+              title="Rotate 90"
             >
               <RotateCw className="w-4 h-4" />
             </Button>
@@ -181,10 +242,10 @@ export const PhotoGallery = ({
 
       {/* Main Photo Display - Larger viewing area */}
       <div className="flex-1 flex flex-col min-h-0 bg-gradient-gallery">
-        <div className="flex-1 bg-muted/20 overflow-hidden relative" style={{ minHeight: '400px' }}>
+        <div className="flex-1 bg-muted/20 overflow-hidden relative" style={{ minHeight: '480px' }}>
           {selectedPhoto ? (
             <div 
-              className={`w-full h-full flex items-center justify-center photo-container cursor-move ${zoom > 1 ? 'zoomed' : ''}`}
+              className={`w-full h-full flex items-start justify-center pt-2 photo-container cursor-move relative ${zoom > 1 ? 'zoomed' : ''}`}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -201,7 +262,16 @@ export const PhotoGallery = ({
                   filter: 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))'
                 }}
                 draggable={false}
+                loading="lazy"
+                decoding="async"
+                onLoad={() => setIsImageLoading(false)}
+                onError={() => setIsImageLoading(false)}
               />
+              {isImageLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
             </div>
           ) : (
             <div className="w-full h-full flex items-center justify-center text-muted-foreground">
@@ -218,31 +288,30 @@ export const PhotoGallery = ({
 
         {/* Improved Photo Info */}
         {selectedPhoto && (
-          <div className="px-3 py-2 bg-background/80 backdrop-blur-sm border-t border-border/50">
+          <div className="px-2 py-1 bg-background/80 backdrop-blur-sm border-t border-border/50">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-foreground truncate flex-1 mr-2" title={selectedPhoto.name}>
+              <p className="text-[11px] font-medium text-foreground truncate flex-1 mr-2" title={selectedPhoto.name}>
                 {selectedPhoto.name}
               </p>
-              {selectedPhoto.location && (
-                <span className="text-xs text-muted-foreground flex-shrink-0">
-                  📍 GPS
-                </span>
-              )}
             </div>
           </div>
         )}
 
         {/* Improved Thumbnail Strip */}
-        <div className="p-2 border-t bg-background/30">
-          <div className="flex gap-1.5 overflow-x-auto pb-1 gallery-scroll" style={{ scrollbarWidth: 'thin' }}>
+        <div className="p-1.5 border-t bg-background/30">
+          <div
+            ref={thumbContainerRef}
+            className="flex gap-1.5 overflow-x-auto pb-1 gallery-scroll"
+            style={{ scrollbarWidth: 'thin', paddingLeft, paddingRight }}
+          >
             {photos.length > 0 ? (
-              photos.map((photo, index) => {
+              visiblePhotos.map((photo) => {
                 const isSelected = selectedPhoto?.name === photo.name;
                 return (
                   <button
                     key={photo.name}
                     onClick={() => onPhotoSelect(photo)}
-                    className={`flex-shrink-0 w-14 h-14 min-w-[56px] min-h-[56px] rounded overflow-hidden border-2 transition-all ${
+                    className={`flex-shrink-0 w-12 h-12 min-w-[48px] min-h-[48px] rounded overflow-hidden border-2 transition-all ${
                       isSelected 
                         ? `${styles.border} shadow-md` 
                         : 'border-border/40 hover:border-border/60'
